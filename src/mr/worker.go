@@ -43,7 +43,7 @@ func Worker(mapf func(string, string) []KeyValue,
 	// CallExample()
 
 	for true {
-		reply, err := CallJob()
+		reply, err := callJob()
 		if err {
 			fmt.Println("Terminating cause of 'call()' error")
 			return
@@ -51,7 +51,7 @@ func Worker(mapf func(string, string) []KeyValue,
 
 		switch reply.JobType {
 		case Mapping:
-			// fmt.Printf("Mapping \"%v\" file\n", reply.Filename)
+			fmt.Printf("Mapping \"%v\" file\n", reply.Filename)
 
 			err := mapFile(mapf, reply)
 			if err != nil {
@@ -60,9 +60,15 @@ func Worker(mapf func(string, string) []KeyValue,
 				return
 			}
 
+			cargs := CompleteArgs{MapID: reply.MapID}
+			r := GenericReply{}
+			if !call("Coordinator.CompletedMap", &cargs, &r) {
+				fmt.Println("ERROR: coordintor not received completion")
+				return
+			}
 			// fmt.Printf("DONE: Mapping \"%v\" file\n", reply.Filename)
 		case Reducing:
-			// fmt.Printf("Reducing %v/%v in progress\n", reply.ProgReduce, reply.NReduce-1)
+			fmt.Printf("Reducing %v/%v in progress\n", reply.RedTaskNum, reply.NReduce-1)
 
 			path := fmt.Sprintf("*-m-out-%v", reply.RedTaskNum)
 			filenames, err := filepath.Glob(path)
@@ -113,7 +119,7 @@ func Worker(mapf func(string, string) []KeyValue,
 
 			// fmt.Printf("DONE: Reducing %v/%v in progress\n", reply.ProgReduce, reply.NReduce-1)
 		case Done:
-			// fmt.Println("Done working")
+			fmt.Println("Done working")
 			return
 		}
 	}
@@ -130,7 +136,7 @@ func mapFile(mapf func(string, string) []KeyValue, reply JobReply) error {
 	size := (len(mapped) / reply.NReduce)
 
 	for i := 0; i < reply.NReduce; i++ {
-		outFilename := fmt.Sprintf("mr-out-%v-%v", reply.MapTaskNum, i)
+		outFilename := fmt.Sprintf("mr-out-%v-%v", reply.MapID, i)
 		out_f, _ := os.Create(outFilename)
 		tmp := ""
 
@@ -193,8 +199,8 @@ func readKV(filePath string) ([]KeyValue, error) {
 	return kvs, nil
 }
 
-func CallJob() (JobReply, bool) {
-	args := JobArgs{}
+func callJob() (JobReply, bool) {
+	args := GenericArgs{}
 	reply := JobReply{}
 
 	ok := call("Coordinator.GiveJob", &args, &reply)

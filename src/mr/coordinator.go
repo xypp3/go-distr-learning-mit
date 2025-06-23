@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/rpc"
 	"os"
+	"sync"
 )
 
 type Status int
@@ -26,6 +27,7 @@ type Coordinator struct {
 	reduceProgress int
 
 	status Status
+	mut    sync.Mutex
 }
 
 // Your code here -- RPC handlers for the worker to call.
@@ -38,17 +40,21 @@ func (c *Coordinator) Example(args *ExampleArgs, reply *ExampleReply) error {
 	return nil
 }
 
-func (c *Coordinator) GiveJob(args *JobArgs, reply *JobReply) error {
-	// TODO: Add locks
+func (c *Coordinator) GiveJob(args *GenericArgs, reply *JobReply) error {
 	// TODO: keep track if all maps are done! (this way a reduce worker doesn't start before all map workers are done)
 	// TODO: Change how to sorting works so that ihash() determines which file to put the reduced key into
+
+	c.mut.Lock()
+	defer c.mut.Unlock()
+
 	reply.JobType = c.status
 	reply.NReduce = c.nReduce
 
 	if c.status == Mapping {
 		reply.Filename = c.allFilenames[c.mapProgress]
-		reply.MapTaskNum = c.mapProgress
+		reply.MapID = c.mapProgress
 
+		fmt.Println("hi")
 		c.mapProgress++
 		if c.mapProgress >= len(c.allFilenames) {
 			c.status = Reducing
@@ -64,6 +70,13 @@ func (c *Coordinator) GiveJob(args *JobArgs, reply *JobReply) error {
 	} else {
 		return errors.New("Reached unknown coordinator status")
 	}
+
+	return nil
+}
+
+func (c *Coordinator) CompletedMap(args *CompleteArgs, reply *GenericReply) error {
+	c.mut.Lock()
+	defer c.mut.Unlock()
 
 	return nil
 }
