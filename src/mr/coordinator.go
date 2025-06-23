@@ -39,19 +39,27 @@ func (c *Coordinator) Example(args *ExampleArgs, reply *ExampleReply) error {
 }
 
 func (c *Coordinator) GiveJob(args *JobArgs, reply *JobReply) error {
+	// TODO: Add locks
+	// TODO: keep track if all maps are done! (this way a reduce worker doesn't start before all map workers are done)
+	// TODO: Change how to sorting works so that ihash() determines which file to put the reduced key into
 	reply.JobType = c.status
+	reply.NReduce = c.nReduce
 
 	if c.status == Mapping {
 		reply.Filename = c.allFilenames[c.mapProgress]
-		reply.NReduce = c.nReduce
+		reply.MapTaskNum = c.mapProgress
 
-		fmt.Println("Coordinator loading file")
-
-		c.mapProgress += 1
+		c.mapProgress++
 		if c.mapProgress >= len(c.allFilenames) {
 			c.status = Reducing
 		}
 	} else if c.status == Reducing {
+		reply.RedTaskNum = c.reduceProgress
+
+		c.reduceProgress++
+		if c.reduceProgress >= c.nReduce {
+			c.status = Done
+		}
 	} else if c.status == Done {
 	} else {
 		return errors.New("Reached unknown coordinator status")

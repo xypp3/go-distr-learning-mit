@@ -30,7 +30,8 @@ type JobReply struct {
 	JobType    Status
 	NReduce    int
 	Filename   string
-	ProgReduce int
+	RedTaskNum int
+	MapTaskNum int
 }
 
 // Cook up a unique-ish UNIX-domain socket name
