@@ -2,6 +2,7 @@ package mr
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"log"
@@ -49,77 +50,43 @@ func Worker(mapf func(string, string) []KeyValue,
 			return
 		}
 
-		switch reply.JobType {
+		switch reply.JobInfo.JobType {
 		case Mapping:
-			fmt.Printf("Mapping \"%v\" file\n", reply.Filename)
+			// fmt.Printf("Mapping \"%v\" file\n", reply.JobInfo.Filename)
 
 			err := mapFile(mapf, reply)
 			if err != nil {
 				fmt.Println(err)
-				fmt.Printf("ERROR: Mapping \"%v\" file\n", reply.Filename)
+				fmt.Printf("ERROR: Mapping JobID:%v --- filename: \"%v\" file\n", reply.JobInfo.MapID, reply.JobInfo.Filename)
 				return
 			}
 
-			cargs := CompleteArgs{MapID: reply.MapID}
+			cargs := CompleteArgs{JobID: reply.JobInfo.MapID}
 			r := GenericReply{}
-			if !call("Coordinator.CompletedMap", &cargs, &r) {
-				fmt.Println("ERROR: coordintor not received completion")
+			if !call("Coordinator.CompletedJob", &cargs, &r) {
+				fmt.Printf("ERROR: coordintor not received completion: %v\n", r.Msg)
 				return
 			}
 			// fmt.Printf("DONE: Mapping \"%v\" file\n", reply.Filename)
 		case Reducing:
-			fmt.Printf("Reducing %v/%v in progress\n", reply.RedTaskNum, reply.NReduce-1)
+			// fmt.Printf("Reducing %v/%v in progress\n", reply.JobInfo.ReduceID, reply.NReduce-1)
 
-			path := fmt.Sprintf("*-m-out-%v", reply.RedTaskNum)
-			filenames, err := filepath.Glob(path)
+			err := reduceFiles(reducef, reply)
 			if err != nil {
 				fmt.Println(err)
-				fmt.Printf("ERROR: Reducing %v/%v in progress\n", reply.RedTaskNum, reply.NReduce-1)
+				fmt.Printf("ERROR: Reducing JobID:%v\n", reply.JobInfo.ReduceID)
 				return
 			}
 
-			tmp := []KeyValue{}
-			for _, v := range filenames {
-				kv, err := readKV(v)
-				if err != nil {
-					fmt.Println(err)
-					fmt.Printf("ERROR: Reducing %v/%v during file reading\n", reply.RedTaskNum, reply.NReduce-1)
-					return
-				}
-
-				tmp = append(tmp, kv...)
+			cargs := CompleteArgs{JobID: reply.JobInfo.ReduceID}
+			r := GenericReply{}
+			if !call("Coordinator.CompletedJob", &cargs, &r) {
+				fmt.Printf("ERROR: coordintor not received completion: %v\n", r.Msg)
+				return
 			}
-			sort.Sort(ByKey(tmp))
-
-			oname := fmt.Sprintf("mr-out-%v", reply.RedTaskNum)
-			ofile, _ := os.Create(oname)
-			defer ofile.Close()
-
-			//
-			// call Reduce on each distinct key in tmp[],
-			// and print the result to mr-out-*.
-			//
-			i := 0
-			for i < len(tmp) {
-				j := i + 1
-				for j < len(tmp) && tmp[j].Key == tmp[i].Key {
-					j++
-				}
-				values := []string{}
-				for k := i; k < j; k++ {
-					values = append(values, tmp[k].Value)
-				}
-				output := reducef(tmp[i].Key, values)
-
-				// this is the correct format for each line of Reduce output.
-				fmt.Fprintf(ofile, "%v %v\n", tmp[i].Key, output)
-
-				i = j
-			}
-
-			// fmt.Printf("DONE: Reducing %v/%v in progress\n", reply.ProgReduce, reply.NReduce-1)
+			// fmt.Printf("DONE: Reducing %v/%v in progress\n", reply.JobInfo.ReduceID, reply.NReduce-1)
 		case Done:
-			fmt.Println("Done working")
+			// fmt.Println("Done working")
 			return
 		}
 	}
@@ -127,16 +94,16 @@ func Worker(mapf func(string, string) []KeyValue,
 }
 
 func mapFile(mapf func(string, string) []KeyValue, reply JobReply) error {
-	bytesFile, err := os.ReadFile(reply.Filename)
+	bytesFile, err := os.ReadFile(reply.JobInfo.Filename)
 	if err != nil {
 		return err
 	}
 
-	mapped := mapf(reply.Filename, string(bytesFile))
+	mapped := mapf(reply.JobInfo.Filename, string(bytesFile))
 	size := (len(mapped) / reply.NReduce)
 
 	for i := 0; i < reply.NReduce; i++ {
-		outFilename := fmt.Sprintf("mr-out-%v-%v", reply.MapID, i)
+		outFilename := fmt.Sprintf("mr-out-%v-%v", reply.JobInfo.MapID, i)
 		out_f, _ := os.Create(outFilename)
 		tmp := ""
 
@@ -154,6 +121,57 @@ func mapFile(mapf func(string, string) []KeyValue, reply JobReply) error {
 
 		fmt.Fprint(out_f, tmp)
 		out_f.Close()
+	}
+
+	return nil
+}
+
+func reduceFiles(reducef func(string, []string) string, reply JobReply) error {
+	path := fmt.Sprintf("mr-out-%v-*", reply.JobInfo.ReduceID)
+	filenames, err := filepath.Glob(path)
+	if err != nil {
+		fmt.Println(err)
+		fmt.Printf("ERROR: Reducing %v/%v in progress\n", reply.JobInfo.ReduceID, reply.NReduce-1)
+		return errors.New("ERROR: Reduce cannot find file\n")
+	}
+
+	tmp := []KeyValue{}
+	for _, v := range filenames {
+		kv, err := readKV(v)
+		if err != nil {
+			fmt.Println(err)
+			fmt.Printf("ERROR: Reducing %v/%v during file reading\n", reply.JobInfo.ReduceID, reply.NReduce-1)
+			return errors.New("ERROR: Reduce cannt read file")
+		}
+
+		tmp = append(tmp, kv...)
+	}
+	sort.Sort(ByKey(tmp))
+
+	oname := fmt.Sprintf("mr-out-%v", reply.JobInfo.ReduceID)
+	ofile, _ := os.Create(oname)
+	defer ofile.Close()
+
+	//
+	// call Reduce on each distinct key in tmp[],
+	// and print the result to mr-out-*.
+	//
+	i := 0
+	for i < len(tmp) {
+		j := i + 1
+		for j < len(tmp) && tmp[j].Key == tmp[i].Key {
+			j++
+		}
+		values := []string{}
+		for k := i; k < j; k++ {
+			values = append(values, tmp[k].Value)
+		}
+		output := reducef(tmp[i].Key, values)
+
+		// this is the correct format for each line of Reduce output.
+		fmt.Fprintf(ofile, "%v %v\n", tmp[i].Key, output)
+
+		i = j
 	}
 
 	return nil

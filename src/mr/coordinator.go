@@ -11,23 +11,40 @@ import (
 	"sync"
 )
 
-type Status int
+type JobType int
 
 const (
-	Mapping Status = iota
+	Mapping JobType = iota
 	Reducing
 	Done
 )
 
+type JobStatus int
+
+const (
+	NotStarted JobStatus = iota
+	InProgress
+	DoneJob
+)
+
+type Job struct {
+	Status  JobStatus
+	JobType JobType
+
+	MapID    int
+	ReduceID int
+
+	Filename string
+}
+
 type Coordinator struct {
 	// Your definitions here.
-	nReduce        int
-	allFilenames   []string
-	mapProgress    int
-	reduceProgress int
+	nReduce int
 
-	status Status
-	mut    sync.Mutex
+	status  JobType
+	jobPool []Job
+
+	mut sync.Mutex
 }
 
 // Your code here -- RPC handlers for the worker to call.
@@ -47,26 +64,19 @@ func (c *Coordinator) GiveJob(args *GenericArgs, reply *JobReply) error {
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
-	reply.JobType = c.status
 	reply.NReduce = c.nReduce
 
-	if c.status == Mapping {
-		reply.Filename = c.allFilenames[c.mapProgress]
-		reply.MapID = c.mapProgress
-
-		fmt.Println("hi")
-		c.mapProgress++
-		if c.mapProgress >= len(c.allFilenames) {
-			c.status = Reducing
+	// NOTE: Coordinator state transitions in CompletedJob() fn
+	if c.status == Mapping || c.status == Reducing {
+		info := c.grabFreeJob()
+		if info == nil {
+			// TODO: return WAIT STATE
+			fmt.Printf("WAITING: On free job (%v)\n", c.status)
+			return nil
 		}
-	} else if c.status == Reducing {
-		reply.RedTaskNum = c.reduceProgress
-
-		c.reduceProgress++
-		if c.reduceProgress >= c.nReduce {
-			c.status = Done
-		}
+		reply.JobInfo = *info
 	} else if c.status == Done {
+		reply.JobInfo.JobType = Done
 	} else {
 		return errors.New("Reached unknown coordinator status")
 	}
@@ -74,11 +84,44 @@ func (c *Coordinator) GiveJob(args *GenericArgs, reply *JobReply) error {
 	return nil
 }
 
-func (c *Coordinator) CompletedMap(args *CompleteArgs, reply *GenericReply) error {
+func (c *Coordinator) CompletedJob(args *CompleteArgs, reply *GenericReply) error {
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
+	c.jobPool[args.JobID].Status = DoneJob
+
+	if c.status == Mapping && c.allJobsDone() {
+		c.status = Reducing
+		c.jobPool = make([]Job, 0)
+		for i := 0; i < c.nReduce; i++ {
+			c.jobPool = append(c.jobPool, Job{ReduceID: i, JobType: Reducing, Status: NotStarted})
+		}
+	} else if c.status == Reducing && c.allJobsDone() {
+		c.status = Done
+	}
+
 	return nil
+}
+
+// WARN: Assumes that caller is inside lock
+func (c *Coordinator) grabFreeJob() *Job {
+	for _, j := range c.jobPool {
+		if j.Status == NotStarted {
+			j.Status = InProgress
+			return &j
+		}
+	}
+	return nil
+}
+
+// WARN: Assumes that caller is inside lock
+func (c *Coordinator) allJobsDone() bool {
+	for _, j := range c.jobPool {
+		if j.Status != DoneJob {
+			return false
+		}
+	}
+	return true
 }
 
 // start a thread that listens for RPCs from worker.go
@@ -116,9 +159,11 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c := Coordinator{}
 
 	// Your code here.
-	c.allFilenames = files
 	c.nReduce = nReduce
-	c.mapProgress = 0
+
+	for i, v := range files {
+		c.jobPool = append(c.jobPool, Job{MapID: i, JobType: Mapping, Status: NotStarted, Filename: v})
+	}
 
 	c.server()
 	return &c

@@ -27,20 +27,18 @@ type ExampleReply struct {
 // Add your RPC definitions here.
 type GenericArgs struct {
 }
+
 type JobReply struct {
-	JobType    Status
-	NReduce    int
-	Filename   string
-	RedTaskNum int
-	MapID      int
+	NReduce int
+	JobInfo Job
 }
 
 type CompleteArgs struct {
-	MapID int
+	JobID int
 }
 
 type GenericReply struct {
-	Reply string
+	Msg string
 }
 
 // Cook up a unique-ish UNIX-domain socket name
