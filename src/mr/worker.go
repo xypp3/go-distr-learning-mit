@@ -100,25 +100,21 @@ func mapFile(mapf func(string, string) []KeyValue, reply JobReply) error {
 	}
 
 	mapped := mapf(reply.JobInfo.Filename, string(bytesFile))
-	size := (len(mapped) / reply.NReduce)
+
+	intermeidate := make([][]KeyValue, reply.NReduce)
+	for _, record := range mapped {
+		intermeidate[ihash(record.Key)%reply.NReduce] = append(intermeidate[ihash(record.Key)%reply.NReduce], record)
+	}
 
 	for i := 0; i < reply.NReduce; i++ {
-		outFilename := fmt.Sprintf("mr-out-%v-%v", reply.JobInfo.MapID, i)
-		out_f, _ := os.Create(outFilename)
 		tmp := ""
-
-		if i+1 == reply.NReduce {
-			j := 0
-			for (size*i)+j < len(mapped) {
-				tmp += fmt.Sprintf("%v %v\n", mapped[(size*i)+j].Key, mapped[(size*i)+j].Value)
-				j++
-			}
-		} else {
-			for j := 0; j < size; j++ {
-				tmp += fmt.Sprintf("%v %v\n", mapped[(size*i)+j].Key, mapped[(size*i)+j].Value)
-			}
+		for _, r := range intermeidate[i] {
+			tmp += fmt.Sprintf("%v %v\n", r.Key, r.Value)
 		}
 
+		// NOTE: Intermediate file name: 'mr-out-X-Y' X is map ID and Y is reduce ID
+		outFilename := fmt.Sprintf("mr-out-%v-%v", reply.JobInfo.MapID, i)
+		out_f, _ := os.Create(outFilename)
 		fmt.Fprint(out_f, tmp)
 		out_f.Close()
 	}
@@ -127,7 +123,8 @@ func mapFile(mapf func(string, string) []KeyValue, reply JobReply) error {
 }
 
 func reduceFiles(reducef func(string, []string) string, reply JobReply) error {
-	path := fmt.Sprintf("mr-out-%v-*", reply.JobInfo.ReduceID)
+	// NOTE: Intermediate file name: 'mr-out-X-Y' X is map ID and Y is reduce ID
+	path := fmt.Sprintf("mr-out-*-%v", reply.JobInfo.ReduceID)
 	filenames, err := filepath.Glob(path)
 	if err != nil {
 		fmt.Println(err)
