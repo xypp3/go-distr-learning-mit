@@ -78,9 +78,10 @@ func (c *Coordinator) GiveJob(args *GenericArgs, reply *JobReply) error {
 			// fmt.Printf("WAITING: On free job (%v)\n", c.status)
 			return nil
 		}
+		info.StartedAt = time.Now()
 		reply.JobInfo = *info
 	} else if c.status == Done {
-		// removeIntermediateFiles()
+		removeIntermediateFiles()
 		reply.JobInfo.JobType = Done
 	} else {
 		return errors.New("Reached unknown coordinator status")
