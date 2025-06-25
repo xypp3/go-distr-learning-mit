@@ -1,16 +1,16 @@
 package mr
 
 import (
-	"bufio"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"io"
 	"log"
 	"net/rpc"
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 )
 
 // Map functions return a slice of KeyValue.
@@ -67,7 +67,7 @@ func Worker(mapf func(string, string) []KeyValue,
 				fmt.Printf("ERROR: coordintor not received completion: %v\n", r.Msg)
 				return
 			}
-			// fmt.Printf("DONE: Mapping \"%v\" file\n", reply.Filename)
+			// fmt.Printf("DONE: Mapping \"%v\" file\n", reply.JobInfo.Filename)
 		case Reducing:
 			// fmt.Printf("Reducing %v/%v in progress\n", reply.JobInfo.ReduceID, reply.NReduce-1)
 
@@ -107,24 +107,31 @@ func mapFile(mapf func(string, string) []KeyValue, reply JobReply) error {
 	}
 
 	for i := 0; i < reply.NReduce; i++ {
-		tmp := ""
-		for _, r := range intermeidate[i] {
-			tmp += fmt.Sprintf("%v %v\n", r.Key, r.Value)
-		}
+		// NOTE: Intermediate file name: 'mr-inter-X-Y' X is map ID and Y is reduce ID
+		outFilename := fmt.Sprintf("mr-inter-%v-%v", reply.JobInfo.MapID, i)
 
-		// NOTE: Intermediate file name: 'mr-out-X-Y' X is map ID and Y is reduce ID
-		outFilename := fmt.Sprintf("mr-out-%v-%v", reply.JobInfo.MapID, i)
-		out_f, _ := os.Create(outFilename)
-		fmt.Fprint(out_f, tmp)
-		out_f.Close()
+		file, err := os.Create(outFilename) // Create/truncate the file
+		if err != nil {
+			return fmt.Errorf("failed to create file %s: %w", outFilename, err)
+		}
+		defer file.Close() // Ensure the file is closed
+
+		encoder := json.NewEncoder(file)
+		encoder.SetIndent("", "  ") // Optional: for pretty-printing the output JSON
+
+		// Encode the KeyValue slice directly to the file stream.
+		err = encoder.Encode(intermeidate[i])
+		if err != nil {
+			return fmt.Errorf("failed to encode JSON to file %s: %w", outFilename, err)
+		}
 	}
 
 	return nil
 }
 
 func reduceFiles(reducef func(string, []string) string, reply JobReply) error {
-	// NOTE: Intermediate file name: 'mr-out-X-Y' X is map ID and Y is reduce ID
-	path := fmt.Sprintf("mr-out-*-%v", reply.JobInfo.ReduceID)
+	// NOTE: Intermediate file name: 'mr-inter-X-Y' X is map ID and Y is reduce ID
+	path := fmt.Sprintf("mr-inter-*-%v", reply.JobInfo.ReduceID)
 	filenames, err := filepath.Glob(path)
 	if err != nil {
 		fmt.Println(err)
@@ -146,8 +153,10 @@ func reduceFiles(reducef func(string, []string) string, reply JobReply) error {
 	sort.Sort(ByKey(tmp))
 
 	oname := fmt.Sprintf("mr-out-%v", reply.JobInfo.ReduceID)
-	ofile, _ := os.Create(oname)
-	defer ofile.Close()
+	ofile, err := os.Create(oname)
+	if err != nil {
+		fmt.Printf("Error creating file '%v'\n", err)
+	}
 
 	//
 	// call Reduce on each distinct key in tmp[],
@@ -171,6 +180,8 @@ func reduceFiles(reducef func(string, []string) string, reply JobReply) error {
 		i = j
 	}
 
+	ofile.Close()
+
 	return nil
 }
 
@@ -180,38 +191,24 @@ func readKV(filePath string) ([]KeyValue, error) {
 		fmt.Printf("Error opening file %s: %v\n", filePath, err)
 		return []KeyValue{}, err
 	}
-	defer file.Close()
+	decoder := json.NewDecoder(file)
 
-	scanner := bufio.NewScanner(file)
-
-	kvs := []KeyValue{}
-
-	lineNumber := 0
-	for scanner.Scan() { // Reads the next line
-		lineNumber++
-		line := scanner.Text() // Get the text of the current line
-
-		// Trim leading/trailing whitespace from the line
-		trimmedLine := strings.TrimSpace(line)
-
-		// Skip empty lines after trimming
-		if trimmedLine == "" {
-			fmt.Printf("Line %d (empty, skipped).\n", lineNumber)
-			continue
+	var data []KeyValue
+	// Decode the JSON data directly from the file stream into the KeyValue slice.
+	err = decoder.Decode(&data)
+	if err != nil {
+		// io.EOF means the file was empty or malformed at the beginning,
+		// but if we expect an array, an empty file would likely error out differently.
+		// For reading a single top-level JSON value, io.EOF is common for empty inputs.
+		// Here, if the file is truly empty or not valid JSON, we'll get a parsing error.
+		if err == io.EOF {
+			return []KeyValue{}, nil // Return an empty slice if the file was empty JSON (e.g., [])
 		}
-
-		// Split the line by one or more spaces
-		// strings.Fields splits by one or more whitespace characters (space, tab, newline, etc.)
-		// and also handles multiple spaces between words correctly, returning non-empty strings.
-		parts := strings.Fields(trimmedLine)
-		tmp := KeyValue{}
-		tmp.Key = parts[0]
-		tmp.Value = parts[1]
-
-		kvs = append(kvs, tmp)
+		return nil, fmt.Errorf("failed to decode JSON from file %s: %w", filePath, err)
 	}
 
-	return kvs, nil
+	file.Close()
+	return data, nil
 }
 
 func callJob() (JobReply, bool) {
