@@ -104,9 +104,9 @@ func (c *Coordinator) CompletedJob(args *CompleteArgs, reply *GenericReply) erro
 
 // WARN: Assumes that caller is inside lock
 func (c *Coordinator) grabFreeJob() *Job {
-	for _, j := range c.jobPool {
+	for i, j := range c.jobPool {
 		if j.Status == NotStarted {
-			j.Status = InProgress
+			c.jobPool[i].Status = InProgress
 			return &j
 		}
 	}
@@ -169,7 +169,7 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 }
 
 func removeIntermediateFiles() {
-	filenames, err := filepath.Glob("mr-out-*-*")
+	filenames, err := filepath.Glob("mr-inter-*-*")
 	if err != nil {
 		fmt.Println(err)
 		fmt.Printf("ERROR: Coordinator cannot find intermeidate files\n")
