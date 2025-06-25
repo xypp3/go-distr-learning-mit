@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 )
 
 // Map functions return a slice of KeyValue.
@@ -48,6 +49,11 @@ func Worker(mapf func(string, string) []KeyValue,
 		if err {
 			fmt.Println("Terminating cause of 'call()' error")
 			return
+		}
+
+		if reply.JobInfo.Status == Waiting {
+			time.Sleep(time.Second)
+			continue
 		}
 
 		switch reply.JobInfo.JobType {
