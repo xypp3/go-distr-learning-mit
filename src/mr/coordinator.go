@@ -48,7 +48,7 @@ type Coordinator struct {
 	timeoutDuration time.Duration
 
 	status  JobType
-	jobPool []Job
+	jobPool []*Job
 
 	mut         sync.Mutex
 	cancelTimer context.CancelFunc
@@ -75,7 +75,7 @@ func (c *Coordinator) GiveJob(args *GenericArgs, reply *JobReply) error {
 		info := c.grabFreeJob()
 		if info == nil {
 			reply.JobInfo.Status = Waiting
-			fmt.Printf("WAITING: On free job (%v)\n", c.status)
+			// fmt.Printf("WAITING: On free job (%v)\n", c.status)
 			return nil
 		}
 		reply.JobInfo = *info
@@ -105,9 +105,9 @@ func (c *Coordinator) CompletedJob(args *CompleteArgs, reply *GenericReply) erro
 
 	if c.status == Mapping && c.allJobsDone() {
 		c.status = Reducing
-		c.jobPool = make([]Job, 0)
+		c.jobPool = make([]*Job, 0)
 		for i := 0; i < c.nReduce; i++ {
-			c.jobPool = append(c.jobPool, Job{ReduceID: i, JobType: Reducing, Status: NotStarted})
+			c.jobPool = append(c.jobPool, &Job{ReduceID: i, JobType: Reducing, Status: NotStarted})
 		}
 	} else if c.status == Reducing && c.allJobsDone() {
 		c.status = Done
@@ -118,10 +118,10 @@ func (c *Coordinator) CompletedJob(args *CompleteArgs, reply *GenericReply) erro
 
 // WARN: Assumes that caller is inside lock
 func (c *Coordinator) grabFreeJob() *Job {
-	for i, j := range c.jobPool {
-		if j.Status == NotStarted {
-			c.jobPool[i].Status = InProgress
-			return &j
+	for _, job := range c.jobPool {
+		if job.Status == NotStarted {
+			job.Status = InProgress
+			return job
 		}
 	}
 	return nil
@@ -177,7 +177,7 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c.timeoutDuration = 10 * time.Second
 
 	for i, v := range files {
-		c.jobPool = append(c.jobPool, Job{MapID: i, JobType: Mapping, Status: NotStarted, Filename: v})
+		c.jobPool = append(c.jobPool, &Job{MapID: i, JobType: Mapping, Status: NotStarted, Filename: v})
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -197,7 +197,6 @@ func (c *Coordinator) startTimeoutMonitor(ctx context.Context) {
 		case <-ticker.C:
 			// Time to check for expired jobs
 			c.mut.Lock() // Lock to safely iterate and modify jobs
-			fmt.Println("checking crashed jobs")
 			for i, job := range c.jobPool {
 				if job.Status == InProgress { // Only check active jobs
 					if time.Since(job.StartedAt) > c.timeoutDuration {
@@ -208,7 +207,7 @@ func (c *Coordinator) startTimeoutMonitor(ctx context.Context) {
 			}
 			c.mut.Unlock()
 		case <-ctx.Done():
-			fmt.Println("Coordinator: Timeout monitor stopped.")
+			// fmt.Println("Coordinator: Timeout monitor stopped.")
 			return // Exit the goroutine when context is canceled
 		}
 	}
