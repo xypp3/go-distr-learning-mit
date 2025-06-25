@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/rpc"
 	"os"
+	"path/filepath"
 	"sync"
 )
 
@@ -58,9 +59,6 @@ func (c *Coordinator) Example(args *ExampleArgs, reply *ExampleReply) error {
 }
 
 func (c *Coordinator) GiveJob(args *GenericArgs, reply *JobReply) error {
-	// TODO: keep track if all maps are done! (this way a reduce worker doesn't start before all map workers are done)
-	// TODO: Change how to sorting works so that ihash() determines which file to put the reduced key into
-
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
@@ -76,6 +74,7 @@ func (c *Coordinator) GiveJob(args *GenericArgs, reply *JobReply) error {
 		}
 		reply.JobInfo = *info
 	} else if c.status == Done {
+		// removeIntermediateFiles()
 		reply.JobInfo.JobType = Done
 	} else {
 		return errors.New("Reached unknown coordinator status")
@@ -167,4 +166,18 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 
 	c.server()
 	return &c
+}
+
+func removeIntermediateFiles() {
+	filenames, err := filepath.Glob("mr-out-*-*")
+	if err != nil {
+		fmt.Println(err)
+		fmt.Printf("ERROR: Coordinator cannot find intermeidate files\n")
+	}
+	for _, f := range filenames {
+		err := os.Remove(f)
+		if err != nil {
+			fmt.Println(err)
+		}
+	}
 }
