@@ -51,6 +51,7 @@ func (kv *KVServer) Get(args *rpc.GetArgs, reply *rpc.GetReply) {
 	}
 	reply.Value = v.Val
 	reply.Version = v.Version
+	reply.Err = rpc.OK
 }
 
 // Update the value for a key if args.Version matches the version of
