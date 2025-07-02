@@ -66,5 +66,31 @@ func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 // arguments. Additionally, reply must be passed as a pointer.
 func (ck *Clerk) Put(key, value string, version rpc.Tversion) rpc.Err {
 	// You will have to modify this function.
+	args := rpc.PutArgs{Key: key, Value: value, Version: version}
+	reply := rpc.PutReply{}
+
+	retry_num := 0
+	for {
+		ok := ck.clnt.Call(ck.server, "KVServer.Put", &args, &reply)
+		if !ok {
+			DPrintf("Client Put: RPC Call failed\n")
+		}
+		if reply.Err == rpc.OK {
+			return reply.Err
+		}
+		if reply.Err == rpc.ErrVersion {
+			// NOTE: Return ErrVersion on first "call()" or ErrMaybe on Nth "call()"
+			if retry_num == 0 {
+				return rpc.ErrVersion
+			} else {
+				return rpc.ErrMaybe
+			}
+		}
+		if retry_num > 10 {
+			break
+		}
+		retry_num++
+	}
+
 	return rpc.ErrNoKey
 }
