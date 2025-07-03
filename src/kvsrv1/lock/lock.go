@@ -1,9 +1,9 @@
 package lock
 
 import (
-	"sync"
 	"time"
 
+	"6.5840/kvsrv1/rpc"
 	"6.5840/kvtest1"
 )
 
@@ -14,10 +14,8 @@ type Lock struct {
 	// MakeLock().
 	ck kvtest.IKVClerk
 	// You may add code here
-	mu   sync.Mutex
-	lock map[string]bool
-	id   string
-	l    string
+	lock_key string
+	id       string
 }
 
 // The tester calls MakeLock() and passes in a k/v clerk; your code can
@@ -28,32 +26,41 @@ type Lock struct {
 func MakeLock(ck kvtest.IKVClerk, l string) *Lock {
 	lk := &Lock{ck: ck}
 	// You may add code here
-	lk.lock = make(map[string]bool)
-	lk.lock[l] = false
 	lk.id = kvtest.RandValue(8)
-	lk.l = l
+	lk.lock_key = l
 
 	return lk
 }
 
 func (lk *Lock) Acquire() {
 	// Your code here
-	for {
-		lk.mu.Lock()
-		v, _ := lk.lock[lk.l]
-		if !v {
-			v = true
-			break
-		}
-		lk.mu.Unlock()
-		time.Sleep(10 * time.Millisecond)
+	id, ver, err := lk.ck.Get(lk.lock_key)
+	if err == rpc.ErrNoKey {
+		lk.ck.Put(lk.lock_key, "", 0)
 	}
-	lk.mu.Unlock()
+	for {
+		if err == rpc.OK && id == "" {
+			err_p := lk.ck.Put(lk.lock_key, lk.id, ver)
+			if err_p == rpc.OK {
+				break
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+		id, ver, err = lk.ck.Get(lk.lock_key)
+	}
 }
 
 func (lk *Lock) Release() {
 	// Your code here
-	lk.mu.Lock()
-	defer lk.mu.Unlock()
-	lk.lock[lk.l] = false
+	id, ver, err := lk.ck.Get(lk.lock_key)
+	for {
+		if err == rpc.OK && id == lk.id {
+			err_p := lk.ck.Put(lk.lock_key, "", ver)
+			if err_p == rpc.OK {
+				break
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+		id, ver, err = lk.ck.Get(lk.lock_key)
+	}
 }
