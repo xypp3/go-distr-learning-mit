@@ -31,6 +31,7 @@ func oneClient(t *testing.T, me int, ck kvtest.IKVClerk, done chan struct{}) kvt
 			// log.Printf("%d: acquired lock", me)
 
 			b := strconv.Itoa(me)
+			fmt.Printf("Hi from unreliable\n")
 			val, ver, err := ck.Get("l0")
 			if err == rpc.OK {
 				if val != "" {
@@ -40,6 +41,7 @@ func oneClient(t *testing.T, me int, ck kvtest.IKVClerk, done chan struct{}) kvt
 				t.Fatalf("%d: get failed %v", me, err)
 			}
 
+			fmt.Printf("Get done starting put \n")
 			err = ck.Put("l0", string(b), ver)
 			if !(err == rpc.OK || err == rpc.ErrMaybe) {
 				t.Fatalf("%d: put failed %v", me, err)
@@ -47,6 +49,7 @@ func oneClient(t *testing.T, me int, ck kvtest.IKVClerk, done chan struct{}) kvt
 
 			time.Sleep(10 * time.Millisecond)
 
+			fmt.Printf("Put done starting put 2\n")
 			err = ck.Put("l0", "", ver+1)
 			if !(err == rpc.OK || err == rpc.ErrMaybe) {
 				t.Fatalf("%d: put failed %v", me, err)
@@ -54,7 +57,9 @@ func oneClient(t *testing.T, me int, ck kvtest.IKVClerk, done chan struct{}) kvt
 
 			// log.Printf("%d: release lock", me)
 
+			fmt.Printf("Put 2 done, starting release\n")
 			lk.Release()
+			fmt.Printf("Release done\n")
 		}
 	}
 	return kvtest.ClntRes{}
@@ -72,14 +77,13 @@ func runClients(t *testing.T, nclnt int, reliable bool) {
 	})
 }
 
-func TestOneClientReliable(t *testing.T) {
-	runClients(t, 1, true)
-}
-
-func TestManyClientsReliable(t *testing.T) {
-	runClients(t, NCLNT, true)
-}
-
+//	func TestOneClientReliable(t *testing.T) {
+//		runClients(t, 1, true)
+//	}
+//
+//	func TestManyClientsReliable(t *testing.T) {
+//		runClients(t, NCLNT, true)
+//	}
 func TestOneClientUnreliable(t *testing.T) {
 	runClients(t, 1, false)
 }

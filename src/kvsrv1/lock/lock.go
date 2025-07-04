@@ -1,6 +1,7 @@
 package lock
 
 import (
+	"fmt"
 	"time"
 
 	"6.5840/kvsrv1/rpc"
@@ -53,14 +54,18 @@ func (lk *Lock) Acquire() {
 func (lk *Lock) Release() {
 	// Your code here
 	id, ver, err := lk.ck.Get(lk.lock_key)
-	for {
-		if err == rpc.OK && id == lk.id {
+	for i := 0; true; i++ {
+		fmt.Printf("Truing to release: %v\n", i)
+		if id == "" {
+			break
+		} else if err == rpc.OK && id == lk.id {
 			err_p := lk.ck.Put(lk.lock_key, "", ver)
+
 			if err_p == rpc.OK {
 				break
 			}
 		}
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 		id, ver, err = lk.ck.Get(lk.lock_key)
 	}
 }
