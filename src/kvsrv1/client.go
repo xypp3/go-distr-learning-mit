@@ -68,9 +68,15 @@ func (ck *Clerk) Put(key, value string, version rpc.Tversion) rpc.Err {
 	reply := rpc.PutReply{}
 
 	ok := ck.clnt.Call(ck.server, "KVServer.Put", &args, &reply)
-	if !ok {
-		DPrintf("Client Put: RPC Call failed\n")
+	count_err_ver := 0
+	for !ok {
+		DPrintf("Client Put: RPC Call failed: %v\n", count_err_ver)
+		ok = ck.clnt.Call(ck.server, "KVServer.Put", &args, &reply)
+		count_err_ver++
 	}
 	// NOTE: Return ErrVersion on first "call()" or ErrMaybe on Nth "call()"
+	if count_err_ver > 0 {
+		return rpc.ErrMaybe
+	}
 	return reply.Err
 }
